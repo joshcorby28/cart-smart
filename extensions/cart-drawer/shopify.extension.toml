@@ -1,0 +1,6 @@
+[[extensions]]
+type = "theme"
+name = "CartSmart Cart Drawer"
+handle = "cart-smart-cart-drawer"
+
+[extensions.settings]
