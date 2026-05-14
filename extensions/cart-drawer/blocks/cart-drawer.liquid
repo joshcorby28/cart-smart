@@ -1,31 +1,36 @@
 {% comment %}
   CartSmart App — Cart Drawer Block
-  Reads all config from shop metafields under the "cart_smart" namespace.
-  Set these via the CartSmart admin UI, or via the Shopify Admin > Content > Metafields.
+  All config comes from shop metafields (namespace: cart_smart).
+  Merchants configure everything via the CartSmart admin settings page.
 {% endcomment %}
 
 {%- liquid
   assign cs = shop.metafields.cart_smart
-  assign enable_free_gift       = cs.enable_free_gift.value | default: false
-  assign free_gift_threshold_raw = cs.free_gift_threshold.value | default: 60 | plus: 0
+  assign enable_free_gift            = cs.enable_free_gift.value | default: false
+  assign free_gift_threshold_raw     = cs.free_gift_threshold.value | default: 60 | plus: 0
   assign free_shipping_threshold_raw = cs.free_shipping_threshold.value | default: 40 | plus: 0
-  assign accent_color           = cs.accent_color.value | default: '#f18a02'
-  assign progress_bg_color      = cs.progress_bg_color.value | default: '#e9e9e9'
-  assign gift_selected_label    = cs.gift_selected_label.value | default: 'Your free gift'
-  assign gift_choose_cta        = cs.gift_choose_cta.value | default: 'CHOOSE GIFT'
-  assign gift_swap_label        = cs.gift_swap_label.value | default: 'SWAP'
-  assign gift_discount_code     = cs.free_gift_discount_code.value | default: ''
-  assign loyalty_ppp            = cs.loyalty_points_per_pound.value | default: 10 | plus: 0
-  assign empty_title            = cs.empty_title.value | default: 'Your cart is empty'
-  assign empty_cta              = cs.empty_cta.value | default: 'Continue Shopping'
-  assign subtotal_label         = cs.subtotal_label.value | default: 'Subtotal'
-  assign continue_cta           = cs.continue_cta.value | default: 'Continue Shopping'
-  assign banner_text            = cs.banner_text.value | default: 'EARN POINTS & REWARDS AS YOU SHOP'
-  assign upsell_collection      = cs.upsell_collection.value
-  assign free_gift_products     = cs.free_gift_products.value
-  assign free_shipping_threshold = free_shipping_threshold_raw | times: 100
-  assign free_gift_threshold     = free_gift_threshold_raw | times: 100
-  assign cart_total              = cart.total_price
+  assign accent_color                = cs.accent_color.value | default: '#f18a02'
+  assign progress_bg_color           = cs.progress_bg_color.value | default: '#e9e9e9'
+  assign gift_selected_label         = cs.gift_selected_label.value | default: 'Your free gift'
+  assign gift_choose_cta             = cs.gift_choose_cta.value | default: 'CHOOSE GIFT'
+  assign gift_swap_label             = cs.gift_swap_label.value | default: 'SWAP'
+  assign gift_discount_code          = cs.free_gift_discount_code.value | default: ''
+  assign empty_title                 = cs.empty_title.value | default: 'Your cart is empty'
+  assign empty_cta                   = cs.empty_cta.value | default: 'Continue Shopping'
+  assign subtotal_label              = cs.subtotal_label.value | default: 'Subtotal'
+  assign continue_cta                = cs.continue_cta.value | default: 'Continue Shopping'
+  assign banner_text                 = cs.banner_text.value | default: 'EARN POINTS & REWARDS AS YOU SHOP'
+  assign free_gift_threshold         = free_gift_threshold_raw | times: 100
+  assign free_shipping_threshold     = free_shipping_threshold_raw | times: 100
+  assign cart_total                  = cart.total_price
+
+  comment
+    Parse comma-separated product handles stored by the app settings page.
+    Use all_products[handle] to look each one up — no metafield product reference type needed.
+  endcomment
+  assign gift_product_handles = cs.free_gift_products.value | default: '' | split: ','
+  assign upsell_collection_handle = cs.upsell_collection.value | default: ''
+
   assign free_gift_item = nil
   for item in cart.items
     if item.properties != blank and item.properties['_free-gift'] == 'true'
@@ -36,9 +41,8 @@
 -%}
 
 {{ 'cart-drawer.css' | asset_url | stylesheet_tag }}
-
-<script src="{{ 'cart.js' | asset_url }}" defer="defer"></script>
 <script src="{{ 'cart-drawer.js' | asset_url }}" defer="defer"></script>
+<script src="{{ 'cart-smart.js' | asset_url }}" defer="defer"></script>
 
 <script>
   window.CartSmartConfig = {
@@ -99,173 +103,151 @@
         </div>
       {%- endif -%}
 
-      <div
-        style="overflow-y: auto; max-height: 100%; height: 100%; overflow-x: hidden;"
-        class="drawer-contents"
-      >
+      <div style="overflow-y:auto;max-height:100%;height:100%;overflow-x:hidden;" class="drawer-contents">
+
         {%- if enable_free_gift -%}
           <div
             class="cart-drawer-rewards"
             data-free-shipping-threshold="{{ free_shipping_threshold }}"
             data-free-gift-threshold="{{ free_gift_threshold }}"
           >
-            <div class="reward-progress-container combined-progress">
-              {%- assign max_threshold = free_shipping_threshold -%}
-              {%- if free_gift_threshold > max_threshold -%}
-                {%- assign max_threshold = free_gift_threshold -%}
-              {%- endif -%}
-              {%- if max_threshold == 0 -%}{%- assign max_threshold = 1 -%}{%- endif -%}
+            {%- assign max_threshold = free_shipping_threshold -%}
+            {%- if free_gift_threshold > max_threshold -%}{%- assign max_threshold = free_gift_threshold -%}{%- endif -%}
+            {%- if max_threshold == 0 -%}{%- assign max_threshold = 1 -%}{%- endif -%}
 
-              <div class="tiered-progress-bar" aria-hidden="true">
-                <div
-                  class="tiered-progress-fill{% if cart_total >= free_shipping_threshold %} complete{% endif %}"
-                  style="width: {{ cart_total | times: 100 | divided_by: max_threshold | at_most: 100 }}%"
-                ></div>
-
-                <div class="milestone-plus" aria-hidden="true" style="--pos: 50%;">
-                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
-                    <path d="M7 1v12M1 7h12"/>
-                  </svg>
-                </div>
-
-                <div
-                  class="milestone-icon delivery-milestone{% if cart_total >= free_shipping_threshold %} reached{% endif %}"
-                  style="--pos: 25%;"
-                >
-                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-                    <path d="M1 3h15v13H1zM16 8h4l3 3v5h-7V8z"/>
-                    <circle cx="5.5" cy="18.5" r="2.5"/>
-                    <circle cx="18.5" cy="18.5" r="2.5"/>
-                  </svg>
-                </div>
-
-                <div
-                  class="milestone-icon gift-milestone{% if cart_total >= free_gift_threshold %} reached{% endif %}"
-                  style="--pos: 75%;"
-                >
-                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-                    <rect x="3" y="8" width="18" height="4" rx="1"/>
-                    <path d="M12 8v13M3 12h18v9H3z"/>
-                    <path d="M8 8c0-2.2 1.8-4 4-4s4 1.8 4 4"/>
-                  </svg>
-                </div>
+            <div class="tiered-progress-bar" aria-hidden="true">
+              <div
+                class="tiered-progress-fill{% if cart_total >= free_shipping_threshold %} complete{% endif %}"
+                style="width: {{ cart_total | times: 100 | divided_by: max_threshold | at_most: 100 }}%"
+              ></div>
+              <div class="milestone-plus" aria-hidden="true" style="--pos: 50%;">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+                  <path d="M7 1v12M1 7h12"/>
+                </svg>
               </div>
-
-              <div class="cart-drawer-milestone-labels" aria-hidden="true">
-                <div class="cart-drawer-milestone-label cart-drawer-milestone-label--delivery" style="--pos: 26%;">
-                  <div class="cart-drawer-milestone-label__title">FREE DELIVERY</div>
-                  <div class="cart-drawer-milestone-label__value">{{ free_shipping_threshold | money_without_trailing_zeros }}</div>
-                </div>
-                <div class="cart-drawer-milestone-label cart-drawer-milestone-label--gift" style="--pos: 74%;">
-                  <div class="cart-drawer-milestone-label__title">GIFT WITH PURCHASE</div>
-                  <div class="cart-drawer-milestone-label__value">{{ free_gift_threshold | money_without_trailing_zeros }}</div>
-                </div>
+              <div class="milestone-icon delivery-milestone{% if cart_total >= free_shipping_threshold %} reached{% endif %}" style="--pos: 25%;">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M1 3h15v13H1zM16 8h4l3 3v5h-7V8z"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/>
+                </svg>
+              </div>
+              <div class="milestone-icon gift-milestone{% if cart_total >= free_gift_threshold %} reached{% endif %}" style="--pos: 75%;">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                  <rect x="3" y="8" width="18" height="4" rx="1"/><path d="M12 8v13M3 12h18v9H3z"/><path d="M8 8c0-2.2 1.8-4 4-4s4 1.8 4 4"/>
+                </svg>
               </div>
             </div>
 
-            {%- if free_gift_products != blank -%}
-              {%- assign free_gift_products_count = free_gift_products.size -%}
-              {%- if cart_total >= free_gift_threshold -%}
-                <div
-                  class="free-gift-selector"
-                  data-cart-total="{{ cart_total }}"
-                  data-threshold="{{ free_gift_threshold }}"
-                  data-gift-count="{{ free_gift_products_count }}"
-                >
-                  {%- if free_gift_products_count == 1 -%}
-                    {%- assign only_product = free_gift_products.first -%}
-                    {%- assign only_variant = only_product.selected_or_first_available_variant -%}
-                    {%- if free_gift_item -%}
-                      <div class="gift-banner gift-banner--selected">
-                        <div class="gift-banner__selected">
-                          <div class="gift-banner__media">
-                            {%- if free_gift_item.image -%}
-                              <img src="{{ free_gift_item.image | image_url: width: 160 }}" alt="{{ free_gift_item.title | escape }}" width="160" height="160" loading="lazy">
-                            {%- endif -%}
-                          </div>
-                          <div class="gift-banner__content">
-                            <div class="gift-banner__kicker">{{ gift_selected_label }}</div>
-                            <div class="gift-banner__title">{{ free_gift_item.title | escape }}</div>
-                          </div>
-                        </div>
-                      </div>
-                    {%- else -%}
-                      <div class="gift-banner gift-banner--unlocked">
-                        <div class="gift-banner__message">You've unlocked a <strong>FREE</strong> gift!</div>
-                        <button
-                          class="gift-banner__button gift-banner__button--primary"
-                          type="button"
-                          data-free-gift-action="selectGift"
-                          data-variant-id-value="{{ only_variant.id }}"
-                          data-product-handle-value="{{ only_product.handle }}"
-                        >
-                          {{ gift_choose_cta }}
-                        </button>
-                      </div>
-                    {%- endif -%}
-                  {%- else -%}
-                    {%- if free_gift_item -%}
-                      <div class="gift-banner gift-banner--selected">
-                        <div class="gift-banner__selected">
-                          <div class="gift-banner__media">
-                            {%- if free_gift_item.image -%}
-                              <img src="{{ free_gift_item.image | image_url: width: 160 }}" alt="{{ free_gift_item.title | escape }}" width="160" height="160" loading="lazy">
-                            {%- endif -%}
-                          </div>
-                          <div class="gift-banner__content">
-                            <div class="gift-banner__kicker">{{ gift_selected_label }}</div>
-                            <div class="gift-banner__title">{{ free_gift_item.title | escape }}</div>
-                          </div>
-                        </div>
-                        <button class="gift-banner__button gift-banner__button--outline" data-free-gift-action="showSelector" type="button">
-                          {{ gift_swap_label }}
-                        </button>
-                      </div>
-                    {%- else -%}
-                      <div class="gift-banner gift-banner--unlocked">
-                        <div class="gift-banner__message">You've unlocked a <strong>FREE</strong> gift!</div>
-                        <button class="gift-banner__button gift-banner__button--primary" data-free-gift-action="showSelector" type="button">
-                          {{ gift_choose_cta }}
-                        </button>
-                      </div>
-                    {%- endif -%}
+            <div class="cart-drawer-milestone-labels" aria-hidden="true">
+              <div class="cart-drawer-milestone-label" style="--pos: 26%;">
+                <div class="cart-drawer-milestone-label__title">FREE DELIVERY</div>
+                <div class="cart-drawer-milestone-label__value">{{ free_shipping_threshold | money_without_trailing_zeros }}</div>
+              </div>
+              <div class="cart-drawer-milestone-label" style="--pos: 74%;">
+                <div class="cart-drawer-milestone-label__title">GIFT WITH PURCHASE</div>
+                <div class="cart-drawer-milestone-label__value">{{ free_gift_threshold | money_without_trailing_zeros }}</div>
+              </div>
+            </div>
 
-                    <div class="free-gift-products" role="dialog" aria-label="Choose a free gift">
-                      <div class="free-gift-products__header">
-                        <div class="free-gift-products__title">Choose a <strong>FREE</strong> gift with your purchase:</div>
-                        <button class="free-gift-products__close" type="button" data-free-gift-action="hideSelector" aria-label="Close">
-                          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
-                            <path d="M6 6l12 12M18 6L6 18"/>
-                          </svg>
-                        </button>
+            {%- if gift_product_handles.size > 0 and cart_total >= free_gift_threshold -%}
+              <div
+                class="free-gift-selector"
+                data-cart-total="{{ cart_total }}"
+                data-threshold="{{ free_gift_threshold }}"
+              >
+                {%- if gift_product_handles.size == 1 -%}
+                  {%- assign first_handle = gift_product_handles[0] | strip -%}
+                  {%- assign only_product = all_products[first_handle] -%}
+                  {%- assign only_variant = only_product.selected_or_first_available_variant -%}
+                  {%- if free_gift_item -%}
+                    <div class="gift-banner gift-banner--selected">
+                      <div class="gift-banner__selected">
+                        <div class="gift-banner__media">
+                          {%- if free_gift_item.image -%}
+                            <img src="{{ free_gift_item.image | image_url: width: 160 }}" alt="{{ free_gift_item.title | escape }}" width="160" height="160" loading="lazy">
+                          {%- endif -%}
+                        </div>
+                        <div class="gift-banner__content">
+                          <div class="gift-banner__kicker">{{ gift_selected_label }}</div>
+                          <div class="gift-banner__title">{{ free_gift_item.title | escape }}</div>
+                        </div>
                       </div>
-                      {%- for product in free_gift_products -%}
-                        {%- assign variant = product.selected_or_first_available_variant -%}
+                    </div>
+                  {%- else -%}
+                    <div class="gift-banner gift-banner--unlocked">
+                      <div class="gift-banner__message">You've unlocked a <strong>FREE</strong> gift!</div>
+                      <button
+                        class="gift-banner__button gift-banner__button--primary"
+                        type="button"
+                        data-free-gift-action="selectGift"
+                        data-variant-id-value="{{ only_variant.id }}"
+                        data-product-handle-value="{{ only_product.handle }}"
+                      >{{ gift_choose_cta }}</button>
+                    </div>
+                  {%- endif -%}
+                {%- else -%}
+                  {%- if free_gift_item -%}
+                    <div class="gift-banner gift-banner--selected">
+                      <div class="gift-banner__selected">
+                        <div class="gift-banner__media">
+                          {%- if free_gift_item.image -%}
+                            <img src="{{ free_gift_item.image | image_url: width: 160 }}" alt="{{ free_gift_item.title | escape }}" width="160" height="160" loading="lazy">
+                          {%- endif -%}
+                        </div>
+                        <div class="gift-banner__content">
+                          <div class="gift-banner__kicker">{{ gift_selected_label }}</div>
+                          <div class="gift-banner__title">{{ free_gift_item.title | escape }}</div>
+                        </div>
+                      </div>
+                      <button class="gift-banner__button gift-banner__button--outline" data-free-gift-action="showSelector" type="button">
+                        {{ gift_swap_label }}
+                      </button>
+                    </div>
+                  {%- else -%}
+                    <div class="gift-banner gift-banner--unlocked">
+                      <div class="gift-banner__message">You've unlocked a <strong>FREE</strong> gift!</div>
+                      <button class="gift-banner__button gift-banner__button--primary" data-free-gift-action="showSelector" type="button">
+                        {{ gift_choose_cta }}
+                      </button>
+                    </div>
+                  {%- endif -%}
+
+                  <div class="free-gift-products" role="dialog" aria-label="Choose a free gift">
+                    <div class="free-gift-products__header">
+                      <div class="free-gift-products__title">Choose a <strong>FREE</strong> gift:</div>
+                      <button class="free-gift-products__close" type="button" data-free-gift-action="hideSelector" aria-label="{{ 'accessibility.close' | t }}">
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+                          <path d="M6 6l12 12M18 6L6 18"/>
+                        </svg>
+                      </button>
+                    </div>
+                    {%- for raw_handle in gift_product_handles -%}
+                      {%- assign clean_handle = raw_handle | strip -%}
+                      {%- assign gift_product = all_products[clean_handle] -%}
+                      {%- if gift_product != empty -%}
+                        {%- assign gift_variant = gift_product.selected_or_first_available_variant -%}
                         <div class="free-gift-product-row">
                           <div class="free-gift-product-row__media">
-                            {%- if product.featured_image -%}
-                              <img src="{{ product.featured_image | image_url: width: 160 }}" alt="{{ product.title | escape }}" width="160" height="160" loading="lazy">
+                            {%- if gift_product.featured_image -%}
+                              <img src="{{ gift_product.featured_image | image_url: width: 160 }}" alt="{{ gift_product.title | escape }}" width="160" height="160" loading="lazy">
                             {%- endif -%}
                           </div>
                           <div class="free-gift-product-row__content">
-                            <div class="free-gift-product-row__kicker">{{ product.type | escape }}</div>
-                            <div class="free-gift-product-row__name">{{ product.title | escape }}</div>
+                            <div class="free-gift-product-row__kicker">{{ gift_product.type | escape }}</div>
+                            <div class="free-gift-product-row__name">{{ gift_product.title | escape }}</div>
                           </div>
                           <button
                             class="free-gift-product-row__select"
                             type="button"
                             data-free-gift-action="selectGift"
-                            data-variant-id-value="{{ variant.id }}"
-                            data-product-handle-value="{{ product.handle }}"
-                          >
-                            SELECT
-                          </button>
+                            data-variant-id-value="{{ gift_variant.id }}"
+                            data-product-handle-value="{{ gift_product.handle }}"
+                          >SELECT</button>
                         </div>
-                      {%- endfor -%}
-                    </div>
-                  {%- endif -%}
-                </div>
-              {%- endif -%}
+                      {%- endif -%}
+                    {%- endfor -%}
+                  </div>
+                {%- endif -%}
+              </div>
             {%- endif -%}
           </div>
         {%- endif -%}
@@ -302,7 +284,6 @@
                             <a href="{% unless is_free_gift %}{{ item.url }}{% endunless %}" class="cart-item__name h4 break">
                               {{- item.product.title | escape -}}
                             </a>
-
                             {%- if is_free_gift -%}
                               <span class="free-gift">
                                 <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
@@ -311,26 +292,20 @@
                                 <span style="font-size:12px;">{{ gift_selected_label }}</span>
                               </span>
                             {%- endif -%}
-
-                            {%- if item.original_price != item.final_price -%}
-                              {% unless is_free_gift %}
-                                <div class="cart-item__discounted-prices">
-                                  <s class="cart-item__old-price product-option">{{- item.original_price | money -}}</s>
-                                  <strong class="cart-item__final-price product-option">{{ item.final_price | money }}</strong>
-                                </div>
-                              {% endunless %}
+                            {%- if item.original_price != item.final_price and is_free_gift == false -%}
+                              <div class="cart-item__discounted-prices">
+                                <s class="cart-item__old-price product-option">{{- item.original_price | money -}}</s>
+                                <strong class="cart-item__final-price product-option">{{ item.final_price | money }}</strong>
+                              </div>
                             {%- endif -%}
-
-                            {%- if item.product.has_only_default_variant == false or item.properties.size != 0 or item.selling_plan_allocation != null -%}
+                            {%- if item.product.has_only_default_variant == false or item.properties.size != 0 -%}
                               <dl>
-                                {%- if item.product.has_only_default_variant == false -%}
-                                  {%- for option in item.options_with_values -%}
-                                    <div class="product-option">
-                                      <dt>{{ option.name }}:</dt>
-                                      <dd>{{ option.value -}}{%- unless forloop.last %}, {% endunless %}</dd>
-                                    </div>
-                                  {%- endfor -%}
-                                {%- endif -%}
+                                {%- for option in item.options_with_values -%}
+                                  <div class="product-option">
+                                    <dt>{{ option.name }}:</dt>
+                                    <dd>{{ option.value -}}{%- unless forloop.last %}, {% endunless %}</dd>
+                                  </div>
+                                {%- endfor -%}
                                 {%- for property in item.properties -%}
                                   {%- assign property_first_char = property.first | slice: 0 -%}
                                   {%- if property.last != blank and property_first_char != '_' -%}
@@ -342,7 +317,6 @@
                                 {%- endfor -%}
                               </dl>
                             {%- endif -%}
-
                             <ul class="discounts list-unstyled" role="list" aria-label="{{ 'customer.order.discount' | t }}">
                               {%- for discount in item.line_level_discount_allocations -%}
                                 <li class="discounts__discount">{{ discount.discount_application.title }}</li>
@@ -351,7 +325,6 @@
                           </td>
 
                           <td class="cart-item__totals right" role="cell" headers="CartDrawer-ColumnTotal">
-                            {%- render 'loading-spinner' -%}
                             <div class="cart-item__price-wrapper">
                               {%- if is_free_gift -%}
                                 <div class="price price--end"><span>{{ gift_selected_label }}</span></div>
@@ -366,12 +339,6 @@
                             </div>
                           </td>
 
-                          {%- liquid
-                            assign has_qty_rules = false
-                            if item.variant.quantity_rule.increment > 1 or item.variant.quantity_rule.min > 1 or item.variant.quantity_rule.max != null
-                              assign has_qty_rules = true
-                            endif
-                          -%}
                           <td class="cart-item__quantity" role="cell" headers="CartDrawer-ColumnQuantity">
                             <div class="cart-item__quantity-wrapper">
                               {% unless is_free_gift or item.product.tags contains 'no-qty-change' %}
@@ -418,40 +385,43 @@
                   </table>
                 </div>
 
-                {%- if upsell_collection != blank -%}
-                  <div class="cart-drawer-upsell" aria-label="Best sellers" data-upsell>
-                    <h3 class="cart-drawer-upsell__title">BEST SELLERS</h3>
-                    <div class="cart-drawer-upsell__carousel">
-                      <button class="cart-drawer-upsell__nav cart-drawer-upsell__nav--prev" type="button" aria-label="Previous"><span aria-hidden="true">‹</span></button>
-                      <div class="cart-drawer-upsell__viewport" tabindex="0">
-                        <div class="cart-drawer-upsell__track" role="list">
-                          {%- for product in upsell_collection.products limit: 12 -%}
-                            {%- assign variant = product.selected_or_first_available_variant -%}
-                            <div class="cart-drawer-upsell__slide" role="listitem">
-                              <div class="cart-drawer-upsell__card">
-                                <a class="cart-drawer-upsell__media" href="{{ product.url }}">
-                                  {%- if product.featured_image -%}
-                                    <img src="{{ product.featured_image | image_url: width: 220 }}" alt="{{ product.title | escape }}" width="110" height="110" loading="lazy">
-                                  {%- endif -%}
-                                </a>
-                                <div class="cart-drawer-upsell__content">
-                                  <a class="cart-drawer-upsell__name" href="{{ product.url }}">{{ product.title | escape }}</a>
+                {%- if upsell_collection_handle != '' -%}
+                  {%- assign upsell_col = collections[upsell_collection_handle] -%}
+                  {%- if upsell_col != empty -%}
+                    <div class="cart-drawer-upsell" aria-label="Best sellers" data-upsell>
+                      <h3 class="cart-drawer-upsell__title">BEST SELLERS</h3>
+                      <div class="cart-drawer-upsell__carousel">
+                        <button class="cart-drawer-upsell__nav cart-drawer-upsell__nav--prev" type="button" aria-label="Previous"><span aria-hidden="true">‹</span></button>
+                        <div class="cart-drawer-upsell__viewport" tabindex="0">
+                          <div class="cart-drawer-upsell__track" role="list">
+                            {%- for product in upsell_col.products limit: 12 -%}
+                              {%- assign upsell_variant = product.selected_or_first_available_variant -%}
+                              <div class="cart-drawer-upsell__slide" role="listitem">
+                                <div class="cart-drawer-upsell__card">
+                                  <a class="cart-drawer-upsell__media" href="{{ product.url }}">
+                                    {%- if product.featured_image -%}
+                                      <img src="{{ product.featured_image | image_url: width: 220 }}" alt="{{ product.title | escape }}" width="110" height="110" loading="lazy">
+                                    {%- endif -%}
+                                  </a>
+                                  <div class="cart-drawer-upsell__content">
+                                    <a class="cart-drawer-upsell__name" href="{{ product.url }}">{{ product.title | escape }}</a>
+                                  </div>
+                                  <div class="cart-drawer-upsell__prices">
+                                    <div class="cart-drawer-upsell__price">{{ product.price | money_without_trailing_zeros }}</div>
+                                    {%- if product.compare_at_price_max > product.price -%}
+                                      <s class="cart-drawer-upsell__compare">{{ product.compare_at_price_max | money_without_trailing_zeros }}</s>
+                                    {%- endif -%}
+                                  </div>
+                                  <button class="cart-drawer-upsell__add" type="button" data-upsell-add data-variant-id="{{ upsell_variant.id }}" aria-label="Add {{ product.title | escape }}">+</button>
                                 </div>
-                                <div class="cart-drawer-upsell__prices">
-                                  <div class="cart-drawer-upsell__price">{{ product.price | money_without_trailing_zeros }}</div>
-                                  {%- if product.compare_at_price_max > product.price -%}
-                                    <s class="cart-drawer-upsell__compare">{{ product.compare_at_price_max | money_without_trailing_zeros }}</s>
-                                  {%- endif -%}
-                                </div>
-                                <button class="cart-drawer-upsell__add" type="button" data-upsell-add data-variant-id="{{ variant.id }}" aria-label="Add {{ product.title | escape }}">+</button>
                               </div>
-                            </div>
-                          {%- endfor -%}
+                            {%- endfor -%}
+                          </div>
                         </div>
+                        <button class="cart-drawer-upsell__nav cart-drawer-upsell__nav--next" type="button" aria-label="Next"><span aria-hidden="true">›</span></button>
                       </div>
-                      <button class="cart-drawer-upsell__nav cart-drawer-upsell__nav--next" type="button" aria-label="Next"><span aria-hidden="true">›</span></button>
                     </div>
-                  </div>
+                  {%- endif -%}
                 {%- endif -%}
               {%- endif -%}
 
@@ -479,12 +449,10 @@
             <p class="totals__total-value">{{ cart.total_price | money_with_currency }}</p>
           </div>
         </div>
-
         <div class="cart-drawer-footer__actions">
           <button type="button" class="cart-drawer-footer__cta" onclick="window.location.href='{{ routes.cart_url }}';">
             CONTINUE TO CART <span class="cart-drawer-footer__cta-arrow" aria-hidden="true">→</span>
           </button>
-
           <ul class="cart-drawer-footer__payments list list-payment" role="list" aria-label="Accepted payment methods">
             {%- assign preferred_payment_types = 'maestro,master,american_express,apple_pay,google_pay,klarna,paypal' | split: ',' -%}
             {%- for type in preferred_payment_types -%}
@@ -496,7 +464,6 @@
               <li class="list-payment__item">{{ 'amazon_pay' | payment_type_svg_tag: class: 'icon icon--full-color' }}</li>
             {%- endif -%}
           </ul>
-
           <button type="button" class="cart-drawer-footer__continue" onclick="this.closest('cart-drawer').close()">
             {{ continue_cta }}
           </button>
@@ -505,3 +472,12 @@
     </div>
   </div>
 </cart-drawer>
+
+{% schema %}
+{
+  "name": "CartSmart Cart Drawer",
+  "target": "body",
+  "javascript": "cart-drawer.js",
+  "stylesheet": "cart-drawer.css"
+}
+{% endschema %}

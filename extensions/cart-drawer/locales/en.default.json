@@ -1,0 +1,45 @@
+{
+  "sections": {
+    "cart": {
+      "title": "Cart",
+      "note": "Order special instructions",
+      "headings": {
+        "image": "Image",
+        "product": "Product",
+        "total": "Total",
+        "quantity": "Quantity"
+      }
+    }
+  },
+  "accessibility": {
+    "close": "Close",
+    "loading": "Loading"
+  },
+  "customer": {
+    "order": {
+      "discount": "Discount"
+    }
+  },
+  "products": {
+    "product": {
+      "quantity": {
+        "decrease": "Decrease quantity for %s",
+        "increase": "Increase quantity for %s",
+        "input_label": "Quantity for %s",
+        "note": "Quantity note",
+        "multiples_of": "Quantity must be a multiple of %s",
+        "minimum_of": "Minimum quantity: %s",
+        "maximum_of": "Maximum quantity: %s"
+      },
+      "volume_pricing": {
+        "title": "Volume pricing",
+        "note": "Volume pricing available"
+      },
+      "price": {
+        "regular_price": "Regular price",
+        "sale_price": "Sale price",
+        "unit_price": "Unit price"
+      }
+    }
+  }
+}

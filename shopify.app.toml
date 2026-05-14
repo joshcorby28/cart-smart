@@ -1,7 +1,7 @@
 # This file stores configurations for your Shopify app.
 
 name = "CartSmart - Free Gift & Cart Rewards"
-client_id = ""
+client_id = "9c3d2aa4e1f080df9e82bc93081d9268"
 
 [access_scopes]
 scopes = "read_products,write_products,read_metafields,write_metafields,read_themes"

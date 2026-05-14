@@ -10,54 +10,32 @@ import {
   BlockStack,
   InlineStack,
   TextField,
-  Select,
   Button,
   Checkbox,
   Divider,
   Banner,
   Badge,
   Box,
+  Thumbnail,
+  Icon,
 } from "@shopify/polaris";
-import { TitleBar } from "@shopify/app-bridge-react";
+import { XSmallIcon } from "@shopify/polaris-icons";
+import { TitleBar, useAppBridge } from "@shopify/app-bridge-react";
 import { authenticate } from "../shopify.server";
 
-// ─── Metafield keys ───────────────────────────────────────────────────────────
-
 const NAMESPACE = "cart_smart";
-
-const KEYS = {
-  enable_free_gift: "enable_free_gift",
-  free_gift_threshold: "free_gift_threshold",
-  free_shipping_threshold: "free_shipping_threshold",
-  accent_color: "accent_color",
-  progress_bg_color: "progress_bg_color",
-  gift_selected_label: "gift_selected_label",
-  gift_choose_cta: "gift_choose_cta",
-  gift_swap_label: "gift_swap_label",
-  free_gift_discount_code: "free_gift_discount_code",
-  loyalty_points_per_pound: "loyalty_points_per_pound",
-  empty_title: "empty_title",
-  empty_cta: "empty_cta",
-  subtotal_label: "subtotal_label",
-  continue_cta: "continue_cta",
-  banner_text: "banner_text",
-} as const;
 
 // ─── Loader ───────────────────────────────────────────────────────────────────
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { admin } = await authenticate.admin(request);
 
+  // Fetch metafields + resolve stored handles back to product/collection titles
   const response = await admin.graphql(`
     query getCartSmartSettings {
       shop {
         metafields(namespace: "cart_smart", first: 30) {
-          edges {
-            node {
-              key
-              value
-            }
-          }
+          edges { node { key value } }
         }
       }
     }
@@ -67,6 +45,43 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const mf: Record<string, string> = {};
   for (const edge of data.shop.metafields.edges) {
     mf[edge.node.key] = edge.node.value;
+  }
+
+  // Resolve stored gift product handles → titles + images
+  const giftHandles: string[] = mf.free_gift_products
+    ? mf.free_gift_products.split(",").map((h: string) => h.trim()).filter(Boolean)
+    : [];
+
+  let giftProducts: { id: string; handle: string; title: string; image: string | null }[] = [];
+
+  if (giftHandles.length > 0) {
+    const productQuery = giftHandles
+      .map((h, i) => `p${i}: productByHandle(handle: ${JSON.stringify(h)}) { id handle title featuredImage { url } }`)
+      .join("\n");
+
+    const productRes = await admin.graphql(`query { ${productQuery} }`);
+    const productData = await productRes.json();
+
+    giftProducts = giftHandles.map((handle, i) => {
+      const p = productData.data[`p${i}`];
+      return p
+        ? { id: p.id, handle: p.handle, title: p.title, image: p.featuredImage?.url ?? null }
+        : { id: handle, handle, title: handle, image: null };
+    });
+  }
+
+  // Resolve stored upsell collection handle → title
+  const upsellHandle = mf.upsell_collection ?? "";
+  let upsellCollection: { id: string; handle: string; title: string } | null = null;
+
+  if (upsellHandle) {
+    const colRes = await admin.graphql(`
+      query { collectionByHandle(handle: ${JSON.stringify(upsellHandle)}) { id handle title } }
+    `);
+    const colData = await colRes.json();
+    if (colData.data.collectionByHandle) {
+      upsellCollection = colData.data.collectionByHandle;
+    }
   }
 
   return json({
@@ -86,7 +101,11 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       subtotal_label: mf.subtotal_label ?? "Subtotal",
       continue_cta: mf.continue_cta ?? "Continue Shopping",
       banner_text: mf.banner_text ?? "EARN POINTS & REWARDS AS YOU SHOP",
+      free_gift_products: mf.free_gift_products ?? "",
+      upsell_collection: upsellHandle,
     },
+    giftProducts,
+    upsellCollection,
   });
 };
 
@@ -96,32 +115,30 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const { admin } = await authenticate.admin(request);
   const formData = await request.formData();
 
-  const metafields = Object.entries(KEYS).map(([key]) => {
-    let value = formData.get(key) as string;
-    // Checkboxes submit "on" when checked, absent when unchecked
+  const keys = [
+    "enable_free_gift", "free_gift_threshold", "free_shipping_threshold",
+    "accent_color", "progress_bg_color", "gift_selected_label", "gift_choose_cta",
+    "gift_swap_label", "free_gift_discount_code", "loyalty_points_per_pound",
+    "empty_title", "empty_cta", "subtotal_label", "continue_cta", "banner_text",
+    "free_gift_products", "upsell_collection",
+  ];
+
+  const metafields = keys.map((key) => {
+    let value: string;
     if (key === "enable_free_gift") {
       value = formData.has("enable_free_gift") ? "true" : "false";
+    } else {
+      value = (formData.get(key) as string) ?? "";
     }
-    return {
-      namespace: NAMESPACE,
-      key,
-      value: value ?? "",
-      type: "single_line_text_field",
-    };
+    return { namespace: NAMESPACE, key, value, type: "single_line_text_field" };
   });
 
   const response = await admin.graphql(
     `#graphql
     mutation setMetafields($metafields: [MetafieldsSetInput!]!) {
       metafieldsSet(metafields: $metafields) {
-        metafields {
-          key
-          value
-        }
-        userErrors {
-          field
-          message
-        }
+        metafields { key value }
+        userErrors { field message }
       }
     }`,
     { variables: { metafields } }
@@ -129,23 +146,29 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
   const { data } = await response.json();
   const errors = data.metafieldsSet.userErrors;
-
-  if (errors.length > 0) {
-    return json({ success: false, errors }, { status: 422 });
-  }
-
+  if (errors.length > 0) return json({ success: false, errors }, { status: 422 });
   return json({ success: true, errors: [] });
 };
+
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+type GiftProduct = { id: string; handle: string; title: string; image: string | null };
+type UpsellCollection = { id: string; handle: string; title: string } | null;
 
 // ─── Component ───────────────────────────────────────────────────────────────
 
 export default function Settings() {
-  const { settings } = useLoaderData<typeof loader>();
+  const { settings, giftProducts: initialGiftProducts, upsellCollection: initialUpsellCollection } =
+    useLoaderData<typeof loader>();
+
   const submit = useSubmit();
   const navigation = useNavigation();
+  const shopify = useAppBridge();
   const isSaving = navigation.state === "submitting";
 
   const [form, setForm] = useState({ ...settings });
+  const [giftProducts, setGiftProducts] = useState<GiftProduct[]>(initialGiftProducts);
+  const [upsellCollection, setUpsellCollection] = useState<UpsellCollection>(initialUpsellCollection);
   const [saved, setSaved] = useState(false);
 
   const set = useCallback(
@@ -155,6 +178,67 @@ export default function Settings() {
     },
     []
   );
+
+  // ─── Gift product picker ──────────────────────────────────────────────────
+
+  const openGiftProductPicker = useCallback(async () => {
+    const selected = await shopify.resourcePicker({
+      type: "product",
+      multiple: true,
+      selectionIds: giftProducts.map((p) => ({ id: p.id })),
+    });
+
+    if (!selected) return;
+
+    const picked: GiftProduct[] = selected.map((p: any) => ({
+      id: p.id,
+      handle: p.handle,
+      title: p.title,
+      image: p.images?.[0]?.originalSrc ?? null,
+    }));
+
+    setGiftProducts(picked);
+    setForm((prev) => ({
+      ...prev,
+      free_gift_products: picked.map((p) => p.handle).join(","),
+    }));
+    setSaved(false);
+  }, [shopify, giftProducts]);
+
+  const removeGiftProduct = useCallback((handle: string) => {
+    setGiftProducts((prev) => {
+      const next = prev.filter((p) => p.handle !== handle);
+      setForm((f) => ({ ...f, free_gift_products: next.map((p) => p.handle).join(",") }));
+      return next;
+    });
+    setSaved(false);
+  }, []);
+
+  // ─── Upsell collection picker ─────────────────────────────────────────────
+
+  const openCollectionPicker = useCallback(async () => {
+    const selected = await shopify.resourcePicker({
+      type: "collection",
+      multiple: false,
+      selectionIds: upsellCollection ? [{ id: upsellCollection.id }] : [],
+    });
+
+    if (!selected || selected.length === 0) return;
+
+    const col = selected[0];
+    const picked: UpsellCollection = { id: col.id, handle: col.handle, title: col.title };
+    setUpsellCollection(picked);
+    setForm((prev) => ({ ...prev, upsell_collection: picked!.handle }));
+    setSaved(false);
+  }, [shopify, upsellCollection]);
+
+  const removeCollection = useCallback(() => {
+    setUpsellCollection(null);
+    setForm((prev) => ({ ...prev, upsell_collection: "" }));
+    setSaved(false);
+  }, []);
+
+  // ─── Submit ───────────────────────────────────────────────────────────────
 
   const handleSubmit = () => {
     const data = new FormData();
@@ -174,20 +258,14 @@ export default function Settings() {
       backAction={{ url: "/app" }}
       title="CartSmart Settings"
       primaryAction={
-        <Button
-          variant="primary"
-          onClick={handleSubmit}
-          loading={isSaving}
-        >
+        <Button variant="primary" onClick={handleSubmit} loading={isSaving}>
           Save Settings
         </Button>
       }
     >
       <TitleBar title="Settings" />
       <BlockStack gap="500">
-        {saved && !isSaving && (
-          <Banner tone="success">Settings saved successfully.</Banner>
-        )}
+        {saved && !isSaving && <Banner tone="success">Settings saved successfully.</Banner>}
 
         {/* ─── Free Gift ─── */}
         <Layout>
@@ -195,19 +273,19 @@ export default function Settings() {
             <Card>
               <BlockStack gap="400">
                 <InlineStack align="space-between" blockAlign="center">
-                  <Text as="h2" variant="headingMd">
-                    Free Gift System
-                  </Text>
+                  <Text as="h2" variant="headingMd">Free Gift System</Text>
                   <Badge tone={form.enable_free_gift ? "success" : "attention"}>
                     {form.enable_free_gift ? "Enabled" : "Disabled"}
                   </Badge>
                 </InlineStack>
                 <Divider />
+
                 <Checkbox
                   label="Enable free gift rewards"
                   checked={form.enable_free_gift}
                   onChange={set("enable_free_gift")}
                 />
+
                 <InlineStack gap="400">
                   <Box minWidth="200px">
                     <TextField
@@ -217,7 +295,7 @@ export default function Settings() {
                       type="number"
                       prefix="£"
                       autoComplete="off"
-                      helpText="Cart value needed to unlock the free gift"
+                      helpText="Cart value to unlock the free gift"
                     />
                   </Box>
                   <Box minWidth="200px">
@@ -228,34 +306,95 @@ export default function Settings() {
                       type="number"
                       prefix="£"
                       autoComplete="off"
-                      helpText="Cart value needed for free delivery"
+                      helpText="Cart value for free delivery milestone"
                     />
                   </Box>
                 </InlineStack>
+
+                {/* Gift products */}
+                <BlockStack gap="200">
+                  <Text as="p" variant="bodyMd" fontWeight="semibold">Gift Products</Text>
+                  <Text as="p" variant="bodyMd" tone="subdued">
+                    Customers choose one of these when they unlock the free gift.
+                  </Text>
+
+                  {giftProducts.length > 0 && (
+                    <BlockStack gap="200">
+                      {giftProducts.map((p) => (
+                        <Box
+                          key={p.handle}
+                          padding="300"
+                          background="bg-surface-secondary"
+                          borderRadius="200"
+                        >
+                          <InlineStack align="space-between" blockAlign="center" gap="300">
+                            <InlineStack gap="300" blockAlign="center">
+                              <Thumbnail
+                                source={p.image ?? ""}
+                                alt={p.title}
+                                size="small"
+                              />
+                              <Text as="p" variant="bodyMd">{p.title}</Text>
+                            </InlineStack>
+                            <Button
+                              variant="plain"
+                              tone="critical"
+                              icon={XSmallIcon}
+                              onClick={() => removeGiftProduct(p.handle)}
+                              accessibilityLabel={`Remove ${p.title}`}
+                            />
+                          </InlineStack>
+                        </Box>
+                      ))}
+                    </BlockStack>
+                  )}
+
+                  <Button onClick={openGiftProductPicker}>
+                    {giftProducts.length > 0 ? "Edit gift products" : "Select gift products"}
+                  </Button>
+                </BlockStack>
+
                 <TextField
                   label="Free gift discount code"
                   value={form.free_gift_discount_code}
                   onChange={set("free_gift_discount_code")}
                   autoComplete="off"
-                  helpText="Optional Shopify discount code applied when the free gift is added"
+                  helpText="Optional — Shopify discount code applied when the free gift is added to cart"
                 />
-                <Box background="bg-surface-secondary" padding="300" borderRadius="200">
-                  <BlockStack gap="200">
-                    <Text as="p" variant="bodyMd" fontWeight="semibold">
-                      Gift Products
-                    </Text>
-                    <Text as="p" variant="bodyMd" tone="subdued">
-                      To set gift products, go to{" "}
-                      <strong>
-                        Shopify Admin → Content → Metafields → Shop
-                      </strong>{" "}
-                      and set the{" "}
-                      <code>cart_smart.free_gift_products</code> metafield to a{" "}
-                      <strong>list of product references</strong>. A visual
-                      product picker will be added in a future release.
-                    </Text>
-                  </BlockStack>
-                </Box>
+              </BlockStack>
+            </Card>
+          </Layout.Section>
+        </Layout>
+
+        {/* ─── Upsell ─── */}
+        <Layout>
+          <Layout.Section>
+            <Card>
+              <BlockStack gap="400">
+                <Text as="h2" variant="headingMd">Best Sellers Carousel</Text>
+                <Divider />
+                <Text as="p" variant="bodyMd" tone="subdued">
+                  Products from this collection appear in the upsell carousel at the bottom of the cart.
+                </Text>
+
+                {upsellCollection && (
+                  <Box padding="300" background="bg-surface-secondary" borderRadius="200">
+                    <InlineStack align="space-between" blockAlign="center">
+                      <Text as="p" variant="bodyMd">{upsellCollection.title}</Text>
+                      <Button
+                        variant="plain"
+                        tone="critical"
+                        icon={XSmallIcon}
+                        onClick={removeCollection}
+                        accessibilityLabel="Remove collection"
+                      />
+                    </InlineStack>
+                  </Box>
+                )}
+
+                <Button onClick={openCollectionPicker}>
+                  {upsellCollection ? "Change collection" : "Select collection"}
+                </Button>
               </BlockStack>
             </Card>
           </Layout.Section>
@@ -266,9 +405,7 @@ export default function Settings() {
           <Layout.Section>
             <Card>
               <BlockStack gap="400">
-                <Text as="h2" variant="headingMd">
-                  Appearance
-                </Text>
+                <Text as="h2" variant="headingMd">Appearance</Text>
                 <Divider />
                 <InlineStack gap="400">
                   <Box minWidth="200px">
@@ -277,7 +414,7 @@ export default function Settings() {
                       value={form.accent_color}
                       onChange={set("accent_color")}
                       autoComplete="off"
-                      helpText="Progress bar fill, milestone icons, CTA button — hex or CSS colour"
+                      helpText="Progress bar, milestones, CTA button — hex value"
                     />
                   </Box>
                   <Box minWidth="200px">
@@ -299,14 +436,18 @@ export default function Settings() {
           <Layout.Section>
             <Card>
               <BlockStack gap="400">
-                <Text as="h2" variant="headingMd">
-                  Labels & Text
-                </Text>
+                <Text as="h2" variant="headingMd">Labels & Text</Text>
                 <Divider />
+                <TextField
+                  label="Top banner text"
+                  value={form.banner_text}
+                  onChange={set("banner_text")}
+                  autoComplete="off"
+                />
                 <InlineStack gap="400">
                   <Box minWidth="200px">
                     <TextField
-                      label="Gift CTA button text"
+                      label="Gift CTA button"
                       value={form.gift_choose_cta}
                       onChange={set("gift_choose_cta")}
                       autoComplete="off"
@@ -314,7 +455,7 @@ export default function Settings() {
                   </Box>
                   <Box minWidth="200px">
                     <TextField
-                      label="Swap gift button text"
+                      label="Swap gift button"
                       value={form.gift_swap_label}
                       onChange={set("gift_swap_label")}
                       autoComplete="off"
@@ -329,12 +470,6 @@ export default function Settings() {
                     />
                   </Box>
                 </InlineStack>
-                <TextField
-                  label="Top banner text"
-                  value={form.banner_text}
-                  onChange={set("banner_text")}
-                  autoComplete="off"
-                />
                 <InlineStack gap="400">
                   <Box minWidth="200px">
                     <TextField
@@ -381,32 +516,17 @@ export default function Settings() {
           <Layout.Section>
             <Card>
               <BlockStack gap="400">
-                <Text as="h2" variant="headingMd">
-                  Advanced
-                </Text>
+                <Text as="h2" variant="headingMd">Advanced</Text>
                 <Divider />
                 <Box minWidth="200px">
                   <TextField
-                    label="Loyalty points per pound"
+                    label="Loyalty points per £1 spent"
                     value={form.loyalty_points_per_pound}
                     onChange={set("loyalty_points_per_pound")}
                     type="number"
                     autoComplete="off"
-                    helpText="Points awarded per £1 spent (shown in cart)"
+                    helpText="Shown in the cart loyalty callout"
                   />
-                </Box>
-                <Box background="bg-surface-secondary" padding="300" borderRadius="200">
-                  <BlockStack gap="200">
-                    <Text as="p" variant="bodyMd" fontWeight="semibold">
-                      Upsell Collection
-                    </Text>
-                    <Text as="p" variant="bodyMd" tone="subdued">
-                      To set the Best Sellers upsell carousel, go to{" "}
-                      <strong>Shopify Admin → Content → Metafields → Shop</strong>{" "}
-                      and set <code>cart_smart.upsell_collection</code> to a{" "}
-                      <strong>collection reference</strong>.
-                    </Text>
-                  </BlockStack>
                 </Box>
               </BlockStack>
             </Card>
